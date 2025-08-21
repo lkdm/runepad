@@ -1,0 +1,147 @@
+<!doctype html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Runepad markdown editor</title>
+  <link
+    rel="icon"
+    href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌀</text></svg>"
+  />
+  <style>
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      margin-left: auto;
+      margin-right: auto;
+      /*max-width: 700px;*/
+      overflow: hidden;
+    }
+    #editor {
+      height: 100%;
+      width: 100%;
+      margin-left: auto;
+      margin-right: auto;
+      overflow-y: unset;
+      /* No overflow here, so editor doesn't scroll */
+    }
+    #title {
+      width: 100%;
+      padding: 0.6rem 0.8rem;
+      font-size: 16pt;
+      font-weight: bold;
+      border: 0;
+
+      background: #fff;
+    }
+
+    #title:active,
+    #title:focus {
+      outline: none;
+      border: none;
+    }
+    .hide {
+      display: none;
+    }
+
+    button {
+      font-size: 0.8rem; /* slightly smaller font */
+      padding: 0 10px; /* less padding */
+      height: 26px; /* shorter height */
+      line-height: 1.1;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background-color: #f5f5f5;
+      cursor: pointer;
+      user-select: none;
+      margin: 0;
+      vertical-align: middle;
+    }
+
+    button:focus {
+      outline: 2px solid #007acc;
+    }
+    header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 42px;
+      background: white;
+      z-index: 1000;
+      display: flex;
+      padding: 0 12px;
+      border-bottom: 1px solid #ccc;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    main {
+      margin-top: 36px; /* equal to top-bar height */
+      flex-grow: 1;
+      overflow-y: auto;
+      padding: 12px;
+      height: calc(100vh - 48px);
+      box-sizing: border-box;
+      display: flex;
+      justify-content: center;
+    }
+    .wrapper {
+      width: 100%;
+      max-width: 720px;
+    }
+    .header-wrapper {
+      display: flex;
+      justify-content: space-between;
+      align-content: center;
+    }
+    #rhs {
+      display: none;
+    }
+    nav {
+      font-family: monospace, monospace;
+      font-size: 8pt;
+    }
+
+    @media print {
+      /* Hides UI during print */
+      header,
+      section,
+      nav footer {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <form>
+    <header>
+      <nav>🌀&nbsp;runepad&nbsp;0.0.1</nav>
+      <nav>
+        <button type="button" id="newButton" title="New file">new</button>
+        <input type="file" accept=".md,.markdown" class="hide" />
+        <button type="button" id="loadButton" title="Load file">open</button>
+        <button id="saveBtn" type="button" title="Save file">save</button>
+
+        <!-- <button -->
+        <!--   id="configBtn" -->
+        <!--   type="button" -->
+        <!--   title="Configuration and info" -->
+        <!--   disabled -->
+        <!-- > -->
+        <!--   ☰ -->
+        <!-- </button> -->
+      </nav>
+    </header>
+    <main>
+      <article class="wrapper">
+        <input id="title" type="text" name="title" maxlength="100" />
+        <div id="editor"></div>
+      </article>
+    </main>
+    <section id="rhs">
+      <h1>runepad</h1>
+    </section>
+  </form>
+</body>
+<script type="module" src="./src/index.ts"></script>

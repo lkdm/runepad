@@ -1,0 +1,15 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "dependencies": {
+        "overtype": "^1.1.8",
+      },
+    },
+  },
+  "packages": {
+    "markdown-actions": ["markdown-actions@1.1.2", "", {}, "sha512-U7rmgTvUP3neh3XaVblikslRWWhfpzF2SiI1A6z3az7IpYuAiVvdqtZrFCArV22TSj2Ht+r0ResohlsJ8/ntbw=="],
+
+    "overtype": ["overtype@1.1.8", "", { "dependencies": { "markdown-actions": "^1.1.2" } }, "sha512-GlFkzgAsZQGm2KyQurUCa4jeCzniPNzwtk+1Nlner4zLBg2OcLEwzLaitfCmKbNygiKLGcuP0QjMvBRAR3//xg=="],
+  }
+}
