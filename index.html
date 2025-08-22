@@ -81,7 +81,6 @@
     }
     main {
       margin-top: 42px; /* equal to top-bar height */
-      margin-bottom: env(safe-area-inset-bottom);
       flex-grow: 1;
       overflow-y: auto;
       padding: 12px;
@@ -93,6 +92,8 @@
     .wrapper {
       width: 100%;
       max-width: 720px;
+      /* Arbitrary padding to fix iOS Safari controls hiding content */
+      padding-bottom: 4rem;
     }
     .header-wrapper {
       display: flex;
