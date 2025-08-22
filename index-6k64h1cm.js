@@ -2638,7 +2638,7 @@ function debounce(fn, delay) {
 var saveAutosave = debounce(async (content, title) => {
   try {
     await saveDocument("autosave", content, title);
-    console.log("Autosaved");
+    console.debug("Autosaved");
   } catch (err) {
     console.error("Autosave failed", err);
   }
