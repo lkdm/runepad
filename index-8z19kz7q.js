@@ -2652,7 +2652,7 @@ var [editor] = new overtype_default("#editor", {
     spellcheck: "default"
   },
   onChange: (value, instance) => {
-    console.log("Content changed:", value);
+    console.debug("Content changed:", value);
     const currentTitle = titleInput?.value || "Untitled";
     saveAutosave(value, currentTitle);
   }
