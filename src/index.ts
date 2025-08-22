@@ -14,7 +14,6 @@ async function saveDocument(id: string, content: string, title: string) {
   });
 }
 
-// Debounce helper that works with functions taking parameters
 function debounce<F extends (...args: any[]) => void>(fn: F, delay: number) {
   let timer: number | null = null;
   return (...args: Parameters<F>) => {
@@ -42,7 +41,7 @@ const [editor] = new OverType("#editor", {
     spellcheck: "default",
   },
   onChange: (value, instance) => {
-    console.log("Content changed:", value);
+    console.debug("Content changed:", value);
     // Call autosave or other logic here using value
     const currentTitle = titleInput?.value || "Untitled";
     saveAutosave(value, currentTitle);
@@ -148,7 +147,7 @@ if (newButton) {
   });
 }
 
-window.addEventListener("keydown", function (e) {
+window.addEventListener("keydown", function(e) {
   const isCtrlOrCmd = e.ctrlKey || e.metaKey;
 
   if (!isCtrlOrCmd) return;
