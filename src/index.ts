@@ -25,7 +25,7 @@ function debounce<F extends (...args: any[]) => void>(fn: F, delay: number) {
 const saveAutosave = debounce(async (content: string, title: string) => {
   try {
     await saveDocument("autosave", content, title);
-    console.log("Autosaved");
+    console.debug("Autosaved");
   } catch (err) {
     console.error("Autosave failed", err);
   }
