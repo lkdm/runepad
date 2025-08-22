@@ -11,6 +11,7 @@ async function saveDocument(id: string, content: string, title: string) {
     store.put({ id, content, title, updated: new Date().toISOString() });
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
+    setFaviconState("saved");
   });
 }
 
@@ -271,3 +272,86 @@ window.addEventListener("load", async () => {
     }
   }
 });
+
+type FaviconState = "saved" | "error" | "new";
+
+function setFaviconState(state: FaviconState) {
+  const link = document.querySelector(
+    'link[rel="icon"]',
+  ) as HTMLLinkElement | null;
+  if (!link) return;
+
+  const swirlChar = "꩜";
+  const size = 90;
+  const cx = 50;
+  const cy = 50;
+
+  let animationFrameId;
+  let angle: number = 0;
+
+  function getSvg(color: string, rotate?: number | null): string {
+    let transform =
+      rotate !== null && rotate !== undefined
+        ? ` transform="rotate(${rotate} 50 50)"`
+        : "";
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <text y=".9em" font-size="90" fill="${color}" font-weight="bold" stroke="black" stroke-width="2"${transform}>꩜</text>
+  </svg>`;
+  }
+
+  function startRotation(durationSec, colorAfter) {
+    angle = 0;
+
+    function rotate() {
+      angle = (angle - 5) % 360;
+      const svg = getSvg("yellow", angle);
+      const encoded = encodeURIComponent(svg)
+        .replace(/'/g, "%27")
+        .replace(/"/g, "%22");
+      if (!link) return;
+      link.href = `data:image/svg+xml,${encoded}`;
+      animationFrameId = requestAnimationFrame(rotate);
+    }
+
+    rotate();
+
+    setTimeout(() => {
+      cancelAnimationFrame(animationFrameId);
+      // Show static green after rotation
+      const svg = getSvg(colorAfter);
+      const encoded = encodeURIComponent(svg)
+        .replace(/'/g, "%27")
+        .replace(/"/g, "%22");
+      if (!link) return;
+      link.href = `data:image/svg+xml,${encoded}`;
+    }, durationSec * 1000);
+  }
+
+  switch (state) {
+    case "saved":
+      startRotation(3, "green");
+      break;
+
+    case "error":
+      cancelAnimationFrame(animationFrameId);
+      const svgError = getSvg("red");
+      const encodedError = encodeURIComponent(svgError)
+        .replace(/'/g, "%27")
+        .replace(/"/g, "%22");
+      link.href = `data:image/svg+xml,${encodedError}`;
+      break;
+
+    case "new":
+      cancelAnimationFrame(animationFrameId);
+      const svgNew = getSvg("blue");
+      const encodedNew = encodeURIComponent(svgNew)
+        .replace(/'/g, "%27")
+        .replace(/"/g, "%22");
+      link.href = `data:image/svg+xml,${encodedNew}`;
+      break;
+
+    default:
+      cancelAnimationFrame(animationFrameId);
+      break;
+  }
+}
