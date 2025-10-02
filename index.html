@@ -21,7 +21,7 @@
       overflow: hidden;
     }
     #editor {
-      height: auto;
+      height: 100%;
       width: 100%;
       margin-left: auto;
       margin-right: auto;
@@ -29,7 +29,7 @@
       /* No overflow here, so editor doesn't scroll */
     }
     #title {
-      width: auto;
+      width: 100%;
       padding: 0.6rem 0.8rem;
       font-size: 16pt;
       font-weight: bold;
@@ -135,7 +135,13 @@
     </header>
     <main>
       <article class="wrapper">
-        <input id="title" type="text" name="title" maxlength="100" />
+        <input
+          id="title"
+          type="text"
+          name="title"
+          maxlength="42"
+          placeholder="Untitled"
+        />
         <div id="editor"></div>
       </article>
     </main>
