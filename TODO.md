@@ -6,7 +6,7 @@ TODO:
 - [x] Favicon
 - [x] Key shortcuts
 - [x] Basic print; remove UI elements
-- [ ] Deploy
+- [x] Deploy
 - [ ] Dark/light mode
 - [ ] Toggle on/off persist storage in indexdb
 - [ ] Add YAML markdown to be added to each document
@@ -22,7 +22,8 @@ Stetch goals
 - [ ] Togglable markdown toolbar
 - [ ] Toggleable Stats bar
 - [ ] Webauthn Encryption/decryption https://www.npmjs.com/package/age-encryption https://words.filippo.io/passkey-encryption/
-- [ ] First-line par indentation (for writing fiction)
+- [ ] ~~First-line par indentation (for writing fiction)~~ (not achievable in
+      textarea)
 - [ ] Break markdown document into sections, to allow editing
 - [ ] Live preview pane
 - [ ] URL support and therefore persisting multiple unsaved documents (challenging, requires syncronising state)
