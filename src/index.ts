@@ -48,6 +48,22 @@ const [editor] = new OverType("#editor", {
   },
 });
 
+const editorArea = document.getElementById("editor");
+if (editorArea) {
+  editorArea.addEventListener("click", (event) => {
+    // Ignore clicks on the actual textarea
+    const editorTextarea = document.querySelector(
+      "#editor textarea",
+    ) as HTMLTextAreaElement | null;
+
+    if (editorTextarea && event.target !== editorTextarea) {
+      editorTextarea.focus();
+      const textLength = editorTextarea.value.length;
+      editorTextarea.setSelectionRange(textLength, textLength); // Select the end of the text
+    }
+  });
+}
+
 const titleInput = document.querySelector<HTMLInputElement>(
   'input[name="title"]',
 );
@@ -59,8 +75,6 @@ function sanitizeTitle(value: string): string {
       .replace(/[\\\/:*?"<>|#%&{}$!'@+=;`~]/g, "")
       // Convert runs of whitespace to a single space
       .replace(/\s+/g, " ")
-      // Remove spaces at the start and end
-      .trim()
       // Limit filename length to 100 characters
       .substring(0, 100)
   );
@@ -89,12 +103,12 @@ if (titleInput) {
     if (e.key === "Enter") {
       e.preventDefault();
       // Move to next focusable element: assume editor textarea is first child of OverType container
-      const editorArea = document.querySelector(
+      const editorTextarea = document.querySelector(
         "#editor textarea",
       ) as HTMLTextAreaElement | null;
-      if (editorArea) {
-        editorArea.focus();
-        editorArea.setSelectionRange(0, 0);
+      if (editorTextarea) {
+        editorTextarea.focus();
+        editorTextarea.setSelectionRange(0, 0);
       }
     }
   });
