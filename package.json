@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "overtype": "^1.1.8"
+    "overtype": "^1.2.7"
   },
   "scripts": {
     "up": "bun run index.html",
