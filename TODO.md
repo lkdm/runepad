@@ -1,5 +1,9 @@
 # Runepad TODO
 
+Bugs:
+
+- [ ] On iOS, the cursor disappears beneath the keyboard
+
 TODO:
 
 - [x] Spellcheck
