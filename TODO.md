@@ -13,6 +13,12 @@ TODO:
 - [ ] Customisable key shortcuts
 - [ ] Proper icons
 
+New goals
+
+- [ ] PWA setup (manifest.json, service worker)
+- [ ] Drag and drop support
+- [ ] Support editing different documents in multiple windows - On load, route to /hash of file; on save, navigate to new hash; indexdb caches contents of file against hash. new contents overwrite old contents
+
 Stetch goals
 
 - [ ] Dynamically change favicon depending on state
