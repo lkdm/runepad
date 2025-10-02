@@ -27,8 +27,7 @@ var MarkdownParser = class {
   static parseHeader(html) {
     return html.replace(/^(#{1,3})\s(.+)$/, (match, hashes, content) => {
       const level = hashes.length;
-      const levelClasses = ["h1", "h2", "h3"];
-      return `<span class="header ${levelClasses[level - 1]}"><span class="syntax-marker">${hashes}</span> ${content}</span>`;
+      return `<h${level}><span class="syntax-marker">${hashes} </span>${content}</h${level}>`;
     });
   }
   static parseHorizontalRule(html) {
@@ -44,12 +43,12 @@ var MarkdownParser = class {
   }
   static parseBulletList(html) {
     return html.replace(/^((?:&nbsp;)*)([-*])\s(.+)$/, (match, indent, marker, content) => {
-      return `${indent}<span class="syntax-marker">${marker}</span> ${content}`;
+      return `${indent}<li class="bullet-list"><span class="syntax-marker">${marker} </span>${content}</li>`;
     });
   }
   static parseNumberedList(html) {
     return html.replace(/^((?:&nbsp;)*)(\d+\.)\s(.+)$/, (match, indent, marker, content) => {
-      return `${indent}<span class="syntax-marker">${marker}</span> ${content}`;
+      return `${indent}<li class="ordered-list"><span class="syntax-marker">${marker} </span>${content}</li>`;
     });
   }
   static parseCodeBlock(html) {
@@ -66,7 +65,12 @@ var MarkdownParser = class {
   }
   static parseItalic(html) {
     html = html.replace(new RegExp("(?<!\\*)\\*(?!\\*)(.+?)(?<!\\*)\\*(?!\\*)", "g"), '<em><span class="syntax-marker">*</span>$1<span class="syntax-marker">*</span></em>');
-    html = html.replace(new RegExp("(?<!_)_(?!_)(.+?)(?<!_)_(?!_)", "g"), '<em><span class="syntax-marker">_</span>$1<span class="syntax-marker">_</span></em>');
+    html = html.replace(new RegExp("(?<=^|\\s)_(?!_)(.+?)(?<!_)_(?!_)(?=\\s|$)", "g"), '<em><span class="syntax-marker">_</span>$1<span class="syntax-marker">_</span></em>');
+    return html;
+  }
+  static parseStrikethrough(html) {
+    html = html.replace(new RegExp("(?<!~)~~(?!~)(.+?)(?<!~)~~(?!~)", "g"), '<del><span class="syntax-marker">~~</span>$1<span class="syntax-marker">~~</span></del>');
+    html = html.replace(new RegExp("(?<!~)~(?!~)(.+?)(?<!~)~(?!~)", "g"), '<del><span class="syntax-marker">~</span>$1<span class="syntax-marker">~</span></del>');
     return html;
   }
   static parseInlineCode(html) {
@@ -93,29 +97,102 @@ var MarkdownParser = class {
     return html.replace(/\[(.+?)\]\((.+?)\)/g, (match, text, url) => {
       const anchorName = `--link-${this.linkIndex++}`;
       const safeUrl = this.sanitizeUrl(url);
-      return `<a href="${safeUrl}" style="anchor-name: ${anchorName}"><span class="syntax-marker">[</span>${text}<span class="syntax-marker">](</span><span class="syntax-marker link-url">${url}</span><span class="syntax-marker">)</span></a>`;
+      return `<a href="${safeUrl}" style="anchor-name: ${anchorName}"><span class="syntax-marker">[</span>${text}<span class="syntax-marker url-part">](${url})</span></a>`;
     });
   }
-  static parseInlineElements(text) {
-    let html = text;
-    html = this.parseInlineCode(html);
+  static identifyAndProtectSanctuaries(text) {
     const sanctuaries = /* @__PURE__ */ new Map;
-    html = html.replace(/(<code>.*?<\/code>)/g, (match) => {
-      const placeholder = `${sanctuaries.size}`;
-      sanctuaries.set(placeholder, match);
+    let sanctuaryCounter = 0;
+    let protectedText = text;
+    const protectedRegions = [];
+    const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+    let linkMatch;
+    while ((linkMatch = linkRegex.exec(text)) !== null) {
+      const bracketPos = linkMatch.index + linkMatch[0].indexOf("](");
+      const urlStart = bracketPos + 2;
+      const urlEnd = urlStart + linkMatch[2].length;
+      protectedRegions.push({ start: urlStart, end: urlEnd });
+    }
+    const codeRegex = new RegExp("(?<!`)(`+)(?!`)((?:(?!\\1).)+?)(\\1)(?!`)", "g");
+    let codeMatch;
+    const codeMatches = [];
+    while ((codeMatch = codeRegex.exec(text)) !== null) {
+      const codeStart = codeMatch.index;
+      const codeEnd = codeMatch.index + codeMatch[0].length;
+      const inProtectedRegion = protectedRegions.some((region) => codeStart >= region.start && codeEnd <= region.end);
+      if (!inProtectedRegion) {
+        codeMatches.push({
+          match: codeMatch[0],
+          index: codeMatch.index,
+          openTicks: codeMatch[1],
+          content: codeMatch[2],
+          closeTicks: codeMatch[3]
+        });
+      }
+    }
+    codeMatches.sort((a, b) => b.index - a.index);
+    codeMatches.forEach((codeInfo) => {
+      const placeholder = `${sanctuaryCounter++}`;
+      sanctuaries.set(placeholder, {
+        type: "code",
+        original: codeInfo.match,
+        openTicks: codeInfo.openTicks,
+        content: codeInfo.content,
+        closeTicks: codeInfo.closeTicks
+      });
+      protectedText = protectedText.substring(0, codeInfo.index) + placeholder + protectedText.substring(codeInfo.index + codeInfo.match.length);
+    });
+    protectedText = protectedText.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
+      const placeholder = `${sanctuaryCounter++}`;
+      sanctuaries.set(placeholder, {
+        type: "link",
+        original: match,
+        linkText,
+        url
+      });
       return placeholder;
     });
-    html = this.parseLinks(html);
-    html = html.replace(/(<a[^>]*>.*?<\/a>)/g, (match) => {
-      const placeholder = `${sanctuaries.size}`;
-      sanctuaries.set(placeholder, match);
-      return placeholder;
+    return { protectedText, sanctuaries };
+  }
+  static restoreAndTransformSanctuaries(html, sanctuaries) {
+    const placeholders = Array.from(sanctuaries.keys()).sort((a, b) => {
+      const indexA = html.indexOf(a);
+      const indexB = html.indexOf(b);
+      return indexA - indexB;
     });
+    placeholders.forEach((placeholder) => {
+      const sanctuary = sanctuaries.get(placeholder);
+      let replacement;
+      if (sanctuary.type === "code") {
+        replacement = `<code><span class="syntax-marker">${sanctuary.openTicks}</span>${sanctuary.content}<span class="syntax-marker">${sanctuary.closeTicks}</span></code>`;
+      } else if (sanctuary.type === "link") {
+        let processedLinkText = sanctuary.linkText;
+        sanctuaries.forEach((innerSanctuary, innerPlaceholder) => {
+          if (processedLinkText.includes(innerPlaceholder)) {
+            if (innerSanctuary.type === "code") {
+              const codeHtml = `<code><span class="syntax-marker">${innerSanctuary.openTicks}</span>${innerSanctuary.content}<span class="syntax-marker">${innerSanctuary.closeTicks}</span></code>`;
+              processedLinkText = processedLinkText.replace(innerPlaceholder, codeHtml);
+            }
+          }
+        });
+        processedLinkText = this.parseStrikethrough(processedLinkText);
+        processedLinkText = this.parseBold(processedLinkText);
+        processedLinkText = this.parseItalic(processedLinkText);
+        const anchorName = `--link-${this.linkIndex++}`;
+        const safeUrl = this.sanitizeUrl(sanctuary.url);
+        replacement = `<a href="${safeUrl}" style="anchor-name: ${anchorName}"><span class="syntax-marker">[</span>${processedLinkText}<span class="syntax-marker url-part">](${this.escapeHtml(sanctuary.url)})</span></a>`;
+      }
+      html = html.replace(placeholder, replacement);
+    });
+    return html;
+  }
+  static parseInlineElements(text) {
+    const { protectedText, sanctuaries } = this.identifyAndProtectSanctuaries(text);
+    let html = protectedText;
+    html = this.parseStrikethrough(html);
     html = this.parseBold(html);
     html = this.parseItalic(html);
-    sanctuaries.forEach((content, placeholder) => {
-      html = html.replace(placeholder, content);
-    });
+    html = this.restoreAndTransformSanctuaries(html, sanctuaries);
     return html;
   }
   static parseLine(line) {
@@ -141,17 +218,289 @@ var MarkdownParser = class {
     this.resetLinkIndex();
     const lines = text.split(`
 `);
+    let inCodeBlock = false;
     const parsedLines = lines.map((line, index) => {
       if (showActiveLineRaw && index === activeLine) {
         const content = this.escapeHtml(line) || "&nbsp;";
         return `<div class="raw-line">${content}</div>`;
       }
+      const codeFenceRegex = /^```[^`]*$/;
+      if (codeFenceRegex.test(line)) {
+        inCodeBlock = !inCodeBlock;
+        return this.parseLine(line);
+      }
+      if (inCodeBlock) {
+        const escaped = this.escapeHtml(line);
+        const indented = this.preserveIndentation(escaped, line);
+        return `<div>${indented || "&nbsp;"}</div>`;
+      }
       return this.parseLine(line);
     });
-    return parsedLines.join("");
+    const html = parsedLines.join("");
+    return this.postProcessHTML(html);
+  }
+  static postProcessHTML(html) {
+    if (typeof document === "undefined" || !document) {
+      return this.postProcessHTMLManual(html);
+    }
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    let currentList = null;
+    let listType = null;
+    let currentCodeBlock = null;
+    let inCodeBlock = false;
+    const children = Array.from(container.children);
+    for (let i = 0;i < children.length; i++) {
+      const child = children[i];
+      if (!child.parentNode)
+        continue;
+      const codeFence = child.querySelector(".code-fence");
+      if (codeFence) {
+        const fenceText = codeFence.textContent;
+        if (fenceText.startsWith("```")) {
+          if (!inCodeBlock) {
+            inCodeBlock = true;
+            currentCodeBlock = document.createElement("pre");
+            const codeElement = document.createElement("code");
+            currentCodeBlock.appendChild(codeElement);
+            currentCodeBlock.className = "code-block";
+            const lang = fenceText.slice(3).trim();
+            if (lang) {
+              codeElement.className = `language-${lang}`;
+            }
+            container.insertBefore(currentCodeBlock, child.nextSibling);
+            currentCodeBlock._codeElement = codeElement;
+            continue;
+          } else {
+            inCodeBlock = false;
+            currentCodeBlock = null;
+            continue;
+          }
+        }
+      }
+      if (inCodeBlock && currentCodeBlock && child.tagName === "DIV" && !child.querySelector(".code-fence")) {
+        const codeElement = currentCodeBlock._codeElement || currentCodeBlock.querySelector("code");
+        if (codeElement.textContent.length > 0) {
+          codeElement.textContent += `
+`;
+        }
+        const lineText = child.textContent.replace(/\u00A0/g, " ");
+        codeElement.textContent += lineText;
+        child.remove();
+        continue;
+      }
+      let listItem = null;
+      if (child.tagName === "DIV") {
+        listItem = child.querySelector("li");
+      }
+      if (listItem) {
+        const isBullet = listItem.classList.contains("bullet-list");
+        const isOrdered = listItem.classList.contains("ordered-list");
+        if (!isBullet && !isOrdered) {
+          currentList = null;
+          listType = null;
+          continue;
+        }
+        const newType = isBullet ? "ul" : "ol";
+        if (!currentList || listType !== newType) {
+          currentList = document.createElement(newType);
+          container.insertBefore(currentList, child);
+          listType = newType;
+        }
+        const indentationNodes = [];
+        for (const node of child.childNodes) {
+          if (node.nodeType === 3 && node.textContent.match(/^\u00A0+$/)) {
+            indentationNodes.push(node.cloneNode(true));
+          } else if (node === listItem) {
+            break;
+          }
+        }
+        indentationNodes.forEach((node) => {
+          listItem.insertBefore(node, listItem.firstChild);
+        });
+        currentList.appendChild(listItem);
+        child.remove();
+      } else {
+        currentList = null;
+        listType = null;
+      }
+    }
+    return container.innerHTML;
+  }
+  static postProcessHTMLManual(html) {
+    let processed = html;
+    processed = processed.replace(/((?:<div>(?:&nbsp;)*<li class="bullet-list">.*?<\/li><\/div>\s*)+)/gs, (match) => {
+      const divs = match.match(/<div>(?:&nbsp;)*<li class="bullet-list">.*?<\/li><\/div>/gs) || [];
+      if (divs.length > 0) {
+        const items = divs.map((div) => {
+          const indentMatch = div.match(/<div>((?:&nbsp;)*)<li/);
+          const listItemMatch = div.match(/<li class="bullet-list">.*?<\/li>/);
+          if (indentMatch && listItemMatch) {
+            const indentation = indentMatch[1];
+            const listItem = listItemMatch[0];
+            return listItem.replace(/<li class="bullet-list">/, `<li class="bullet-list">${indentation}`);
+          }
+          return listItemMatch ? listItemMatch[0] : "";
+        }).filter(Boolean);
+        return "<ul>" + items.join("") + "</ul>";
+      }
+      return match;
+    });
+    processed = processed.replace(/((?:<div>(?:&nbsp;)*<li class="ordered-list">.*?<\/li><\/div>\s*)+)/gs, (match) => {
+      const divs = match.match(/<div>(?:&nbsp;)*<li class="ordered-list">.*?<\/li><\/div>/gs) || [];
+      if (divs.length > 0) {
+        const items = divs.map((div) => {
+          const indentMatch = div.match(/<div>((?:&nbsp;)*)<li/);
+          const listItemMatch = div.match(/<li class="ordered-list">.*?<\/li>/);
+          if (indentMatch && listItemMatch) {
+            const indentation = indentMatch[1];
+            const listItem = listItemMatch[0];
+            return listItem.replace(/<li class="ordered-list">/, `<li class="ordered-list">${indentation}`);
+          }
+          return listItemMatch ? listItemMatch[0] : "";
+        }).filter(Boolean);
+        return "<ol>" + items.join("") + "</ol>";
+      }
+      return match;
+    });
+    const codeBlockRegex = /<div><span class="code-fence">(```[^<]*)<\/span><\/div>(.*?)<div><span class="code-fence">(```)<\/span><\/div>/gs;
+    processed = processed.replace(codeBlockRegex, (match, openFence, content, closeFence) => {
+      const lines = content.match(/<div>(.*?)<\/div>/gs) || [];
+      const codeContent = lines.map((line) => {
+        const text = line.replace(/<div>(.*?)<\/div>/s, "$1").replace(/&nbsp;/g, " ");
+        return text;
+      }).join(`
+`);
+      const lang = openFence.slice(3).trim();
+      const langClass = lang ? ` class="language-${lang}"` : "";
+      let result = `<div><span class="code-fence">${openFence}</span></div>`;
+      result += `<pre class="code-block"><code${langClass}>${codeContent}</code></pre>`;
+      result += `<div><span class="code-fence">${closeFence}</span></div>`;
+      return result;
+    });
+    return processed;
+  }
+  static getListContext(text, cursorPosition) {
+    const lines = text.split(`
+`);
+    let currentPos = 0;
+    let lineIndex = 0;
+    let lineStart = 0;
+    for (let i = 0;i < lines.length; i++) {
+      const lineLength = lines[i].length;
+      if (currentPos + lineLength >= cursorPosition) {
+        lineIndex = i;
+        lineStart = currentPos;
+        break;
+      }
+      currentPos += lineLength + 1;
+    }
+    const currentLine = lines[lineIndex];
+    const lineEnd = lineStart + currentLine.length;
+    const checkboxMatch = currentLine.match(this.LIST_PATTERNS.checkbox);
+    if (checkboxMatch) {
+      return {
+        inList: true,
+        listType: "checkbox",
+        indent: checkboxMatch[1],
+        marker: "-",
+        checked: checkboxMatch[2] === "x",
+        content: checkboxMatch[3],
+        lineStart,
+        lineEnd,
+        markerEndPos: lineStart + checkboxMatch[1].length + checkboxMatch[2].length + 5
+      };
+    }
+    const bulletMatch = currentLine.match(this.LIST_PATTERNS.bullet);
+    if (bulletMatch) {
+      return {
+        inList: true,
+        listType: "bullet",
+        indent: bulletMatch[1],
+        marker: bulletMatch[2],
+        content: bulletMatch[3],
+        lineStart,
+        lineEnd,
+        markerEndPos: lineStart + bulletMatch[1].length + bulletMatch[2].length + 1
+      };
+    }
+    const numberedMatch = currentLine.match(this.LIST_PATTERNS.numbered);
+    if (numberedMatch) {
+      return {
+        inList: true,
+        listType: "numbered",
+        indent: numberedMatch[1],
+        marker: parseInt(numberedMatch[2]),
+        content: numberedMatch[3],
+        lineStart,
+        lineEnd,
+        markerEndPos: lineStart + numberedMatch[1].length + numberedMatch[2].length + 2
+      };
+    }
+    return {
+      inList: false,
+      listType: null,
+      indent: "",
+      marker: null,
+      content: currentLine,
+      lineStart,
+      lineEnd,
+      markerEndPos: lineStart
+    };
+  }
+  static createNewListItem(context) {
+    switch (context.listType) {
+      case "bullet":
+        return `${context.indent}${context.marker} `;
+      case "numbered":
+        return `${context.indent}${context.marker + 1}. `;
+      case "checkbox":
+        return `${context.indent}- [ ] `;
+      default:
+        return "";
+    }
+  }
+  static renumberLists(text) {
+    const lines = text.split(`
+`);
+    const numbersByIndent = /* @__PURE__ */ new Map;
+    let inList = false;
+    const result = lines.map((line) => {
+      const match = line.match(this.LIST_PATTERNS.numbered);
+      if (match) {
+        const indent = match[1];
+        const indentLevel = indent.length;
+        const content = match[3];
+        if (!inList) {
+          numbersByIndent.clear();
+        }
+        const currentNumber = (numbersByIndent.get(indentLevel) || 0) + 1;
+        numbersByIndent.set(indentLevel, currentNumber);
+        for (const [level] of numbersByIndent) {
+          if (level > indentLevel) {
+            numbersByIndent.delete(level);
+          }
+        }
+        inList = true;
+        return `${indent}${currentNumber}. ${content}`;
+      } else {
+        if (line.trim() === "" || !line.match(/^\s/)) {
+          inList = false;
+          numbersByIndent.clear();
+        }
+        return line;
+      }
+    });
+    return result.join(`
+`);
   }
 };
 __publicField(MarkdownParser, "linkIndex", 0);
+__publicField(MarkdownParser, "LIST_PATTERNS", {
+  bullet: /^(\s*)([-*+])\s+(.*)$/,
+  numbered: /^(\s*)(\d+)\.\s+(.*)$/,
+  checkbox: /^(\s*)-\s+\[([ x])\]\s+(.*)$/
+});
 var __defProp2 = Object.defineProperty;
 var __getOwnPropSymbols = Object.getOwnPropertySymbols;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
@@ -1180,14 +1529,53 @@ function generateStyles(options = {}) {
   const themeVars = theme && theme.colors ? themeToCSSVars(theme.colors) : "";
   return `
     /* OverType Editor Styles */
+    
+    /* Middle-ground CSS Reset - Prevent parent styles from leaking in */
+    .overtype-container * {
+      /* Box model - these commonly leak */
+      margin: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      
+      /* Layout - these can break our layout */
+      /* Don't reset position - it breaks dropdowns */
+      float: none !important;
+      clear: none !important;
+      
+      /* Typography - only reset decorative aspects */
+      text-decoration: none !important;
+      text-transform: none !important;
+      letter-spacing: normal !important;
+      
+      /* Visual effects that can interfere */
+      box-shadow: none !important;
+      text-shadow: none !important;
+      
+      /* Ensure box-sizing is consistent */
+      box-sizing: border-box !important;
+      
+      /* Keep inheritance for these */
+      /* font-family, color, line-height, font-size - inherit */
+    }
+    
+    /* Container base styles after reset */
     .overtype-container {
       display: grid !important;
       grid-template-rows: auto 1fr auto !important;
       width: 100% !important;
       height: 100% !important;
+      position: relative !important; /* Override reset - needed for absolute children */
+      overflow: visible !important; /* Allow dropdown to overflow container */
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+      text-align: left !important;
       ${themeVars ? `
       /* Theme Variables */
       ${themeVars}` : ""}
+    }
+    
+    /* Force left alignment for all elements in the editor */
+    .overtype-container .overtype-wrapper * {
+      text-align: left !important;
     }
     
     /* Auto-resize mode styles */
@@ -1203,20 +1591,21 @@ function generateStyles(options = {}) {
     }
     
     .overtype-wrapper {
-      position: relative !important;
+      position: relative !important; /* Override reset - needed for absolute children */
       width: 100% !important;
       height: 100% !important; /* Take full height of grid cell */
       min-height: 60px !important; /* Minimum usable height */
       overflow: hidden !important;
       background: var(--bg-secondary, #ffffff) !important;
       grid-row: 2 !important; /* Always second row in grid */
+      z-index: 1; /* Below toolbar and dropdown */
     }
 
     /* Critical alignment styles - must be identical for both layers */
     .overtype-wrapper .overtype-input,
     .overtype-wrapper .overtype-preview {
       /* Positioning - must be identical */
-      position: absolute !important;
+      position: absolute !important; /* Override reset - required for overlay */
       top: 0 !important;
       left: 0 !important;
       width: 100% !important;
@@ -1283,7 +1672,7 @@ function generateStyles(options = {}) {
       /* Overflow */
       overflow-y: auto !important;
       overflow-x: auto !important;
-      overscroll-behavior: none !important;
+      /* overscroll-behavior removed to allow scroll-through to parent */
       scrollbar-width: auto !important;
       scrollbar-gutter: auto !important;
       
@@ -1371,6 +1760,45 @@ function generateStyles(options = {}) {
       color: var(--h3, #3d8a51) !important; 
     }
 
+    /* Semantic headers - flatten in edit mode */
+    .overtype-wrapper .overtype-preview h1,
+    .overtype-wrapper .overtype-preview h2,
+    .overtype-wrapper .overtype-preview h3 {
+      font-size: inherit !important;
+      font-weight: bold !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      display: inline !important;
+      line-height: inherit !important;
+    }
+
+    /* Header colors for semantic headers */
+    .overtype-wrapper .overtype-preview h1 { 
+      color: var(--h1, #f95738) !important; 
+    }
+    .overtype-wrapper .overtype-preview h2 { 
+      color: var(--h2, #ee964b) !important; 
+    }
+    .overtype-wrapper .overtype-preview h3 { 
+      color: var(--h3, #3d8a51) !important; 
+    }
+
+    /* Lists - remove styling in edit mode */
+    .overtype-wrapper .overtype-preview ul,
+    .overtype-wrapper .overtype-preview ol {
+      list-style: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      display: block !important; /* Lists need to be block for line breaks */
+    }
+
+    .overtype-wrapper .overtype-preview li {
+      display: block !important; /* Each item on its own line */
+      margin: 0 !important;
+      padding: 0 !important;
+      /* Don't set list-style here - let ul/ol control it */
+    }
+
     /* Bold text */
     .overtype-wrapper .overtype-preview strong {
       color: var(--strong, #ee964b) !important;
@@ -1385,6 +1813,14 @@ function generateStyles(options = {}) {
       font-style: italic !important;
     }
 
+    /* Strikethrough text */
+    .overtype-wrapper .overtype-preview del {
+      color: var(--del, #ee964b) !important;
+      text-decoration: line-through !important;
+      text-decoration-color: var(--del, #ee964b) !important;
+      text-decoration-thickness: 1px !important;
+    }
+
     /* Inline code */
     .overtype-wrapper .overtype-preview code {
       background: var(--code-bg, rgba(244, 211, 94, 0.4)) !important;
@@ -1397,17 +1833,23 @@ function generateStyles(options = {}) {
       font-weight: normal !important;
     }
 
-    /* Code blocks */
+    /* Code blocks - consolidated pre blocks */
     .overtype-wrapper .overtype-preview pre {
-      background: #1e1e1e !important;
       padding: 0 !important;
       margin: 0 !important;
       border-radius: 4px !important;
       overflow-x: auto !important;
     }
+    
+    /* Code block styling in normal mode - yellow background */
+    .overtype-wrapper .overtype-preview pre.code-block {
+      background: var(--code-bg, rgba(244, 211, 94, 0.4)) !important;
+    }
 
+    /* Code inside pre blocks - remove background */
     .overtype-wrapper .overtype-preview pre code {
-      background: none !important;
+      background: transparent !important;
+      color: var(--code, #0d3b66) !important;
     }
 
     /* Blockquotes */
@@ -1438,11 +1880,6 @@ function generateStyles(options = {}) {
       padding: 0 !important;
     }
 
-    .overtype-wrapper .overtype-preview li {
-      margin: 0 !important;
-      padding: 0 !important;
-      list-style: none !important;
-    }
 
     /* Horizontal rules */
     .overtype-wrapper .overtype-preview hr {
@@ -1527,10 +1964,10 @@ function generateStyles(options = {}) {
       height: 8px !important;
       background: #4caf50 !important;
       border-radius: 50% !important;
-      animation: pulse 2s infinite !important;
+      animation: overtype-pulse 2s infinite !important;
     }
     
-    @keyframes pulse {
+    @keyframes overtype-pulse {
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.6; transform: scale(1.2); }
     }
@@ -1538,16 +1975,34 @@ function generateStyles(options = {}) {
 
     /* Toolbar Styles */
     .overtype-toolbar {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      padding: 8px;
-      background: var(--toolbar-bg, var(--bg-primary, #f8f9fa));
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-      flex-shrink: 0;
+      display: flex !important;
+      align-items: center !important;
+      gap: 4px !important;
+      padding: 8px !important; /* Override reset */
+      background: var(--toolbar-bg, var(--bg-primary, #f8f9fa)) !important; /* Override reset */
+      overflow-x: auto !important; /* Allow horizontal scrolling */
+      overflow-y: hidden !important; /* Hide vertical overflow */
+      -webkit-overflow-scrolling: touch !important;
+      flex-shrink: 0 !important;
       height: auto !important;
       grid-row: 1 !important; /* Always first row in grid */
+      position: relative !important; /* Override reset */
+      z-index: 100 !important; /* Ensure toolbar is above wrapper */
+      scrollbar-width: thin; /* Thin scrollbar on Firefox */
+    }
+    
+    /* Thin scrollbar styling */
+    .overtype-toolbar::-webkit-scrollbar {
+      height: 4px;
+    }
+    
+    .overtype-toolbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    
+    .overtype-toolbar::-webkit-scrollbar-thumb {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 2px;
     }
 
     .overtype-toolbar-button {
@@ -1637,6 +2092,214 @@ function generateStyles(options = {}) {
       color: transparent !important;
     }
 
+    /* Dropdown menu styles */
+    .overtype-toolbar-button {
+      position: relative !important; /* Override reset - needed for dropdown */
+    }
+
+    .overtype-toolbar-button.dropdown-active {
+      background: var(--toolbar-active, var(--hover-bg, #f0f0f0));
+    }
+
+    .overtype-dropdown-menu {
+      position: fixed !important; /* Fixed positioning relative to viewport */
+      background: var(--bg-secondary, white) !important; /* Override reset */
+      border: 1px solid var(--border, #e0e0e0) !important; /* Override reset */
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important; /* Override reset */
+      z-index: 10000; /* Very high z-index to ensure visibility */
+      min-width: 150px;
+      padding: 4px 0 !important; /* Override reset */
+      /* Position will be set via JavaScript based on button position */
+    }
+
+    .overtype-dropdown-item {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      padding: 8px 12px;
+      border: none;
+      background: none;
+      text-align: left;
+      cursor: pointer;
+      font-size: 14px;
+      color: var(--text, #333);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    .overtype-dropdown-item:hover {
+      background: var(--hover-bg, #f0f0f0);
+    }
+
+    .overtype-dropdown-item.active {
+      font-weight: 600;
+    }
+
+    .overtype-dropdown-check {
+      width: 16px;
+      margin-right: 8px;
+      color: var(--h1, #007bff);
+    }
+
+    /* Preview mode styles */
+    .overtype-container.preview-mode .overtype-input {
+      display: none !important;
+    }
+
+    .overtype-container.preview-mode .overtype-preview {
+      pointer-events: auto !important;
+      user-select: text !important;
+      cursor: text !important;
+    }
+
+    /* Hide syntax markers in preview mode */
+    .overtype-container.preview-mode .syntax-marker {
+      display: none !important;
+    }
+    
+    /* Hide URL part of links in preview mode - extra specificity */
+    .overtype-container.preview-mode .syntax-marker.url-part,
+    .overtype-container.preview-mode .url-part {
+      display: none !important;
+    }
+    
+    /* Hide all syntax markers inside links too */
+    .overtype-container.preview-mode a .syntax-marker {
+      display: none !important;
+    }
+
+    /* Headers - restore proper sizing in preview mode */
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview h1, 
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview h2, 
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview h3 {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+      font-weight: 600 !important;
+      margin: 0 !important;
+      display: block !important;
+      color: inherit !important; /* Use parent text color */
+      line-height: 1 !important; /* Tight line height for headings */
+    }
+    
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview h1 { 
+      font-size: 2em !important; 
+    }
+    
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview h2 { 
+      font-size: 1.5em !important; 
+    }
+    
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview h3 { 
+      font-size: 1.17em !important; 
+    }
+
+    /* Lists - restore list styling in preview mode */
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview ul {
+      display: block !important;
+      list-style: disc !important;
+      padding-left: 2em !important;
+      margin: 1em 0 !important;
+    }
+
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview ol {
+      display: block !important;
+      list-style: decimal !important;
+      padding-left: 2em !important;
+      margin: 1em 0 !important;
+    }
+    
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview li {
+      display: list-item !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+
+    /* Links - make clickable in preview mode */
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview a {
+      pointer-events: auto !important;
+      cursor: pointer !important;
+      color: var(--link, #0066cc) !important;
+      text-decoration: underline !important;
+    }
+
+    /* Code blocks - proper pre/code styling in preview mode */
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview pre.code-block {
+      background: #2d2d2d !important;
+      color: #f8f8f2 !important;
+      padding: 1.2em !important;
+      border-radius: 3px !important;
+      overflow-x: auto !important;
+      margin: 0 !important;
+      display: block !important;
+    }
+    
+    /* Cave theme code block background in preview mode */
+    .overtype-container[data-theme="cave"].preview-mode .overtype-wrapper .overtype-preview pre.code-block {
+      background: #11171F !important;
+    }
+
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview pre.code-block code {
+      background: transparent !important;
+      color: inherit !important;
+      padding: 0 !important;
+      font-family: ${fontFamily} !important;
+      font-size: 0.9em !important;
+      line-height: 1.4 !important;
+    }
+
+    /* Hide old code block lines and fences in preview mode */
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview .code-block-line {
+      display: none !important;
+    }
+
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview .code-fence {
+      display: none !important;
+    }
+
+    /* Blockquotes - enhanced styling in preview mode */
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview .blockquote {
+      display: block !important;
+      border-left: 4px solid var(--blockquote, #ddd) !important;
+      padding-left: 1em !important;
+      margin: 1em 0 !important;
+      font-style: italic !important;
+    }
+
+    /* Typography improvements in preview mode */
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview {
+      font-family: Georgia, 'Times New Roman', serif !important;
+      font-size: 16px !important;
+      line-height: 1.8 !important;
+      color: var(--text, #333) !important; /* Consistent text color */
+    }
+
+    /* Inline code in preview mode - keep monospace */
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview code {
+      font-family: ${fontFamily} !important;
+      font-size: 0.9em !important;
+      background: rgba(135, 131, 120, 0.15) !important;
+      padding: 0.2em 0.4em !important;
+      border-radius: 3px !important;
+    }
+
+    /* Strong and em elements in preview mode */
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview strong {
+      font-weight: 700 !important;
+      color: inherit !important; /* Use parent text color */
+    }
+
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview em {
+      font-style: italic !important;
+      color: inherit !important; /* Use parent text color */
+    }
+
+    /* HR in preview mode */
+    .overtype-container.preview-mode .overtype-wrapper .overtype-preview .hr-marker {
+      display: block !important;
+      border-top: 2px solid var(--hr, #ddd) !important;
+      text-indent: -9999px !important;
+      height: 2px !important;
+    }
+
     ${mobileStyles}
   `;
 }
@@ -1702,17 +2365,19 @@ var eyeIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke
   <circle cx="12" cy="12" r="3" fill="none"></circle>
 </svg>`;
 var Toolbar = class {
-  constructor(editor) {
+  constructor(editor, buttonConfig = null) {
     this.editor = editor;
     this.container = null;
     this.buttons = {};
+    this.buttonConfig = buttonConfig;
   }
   create() {
+    var _a;
     this.container = document.createElement("div");
     this.container.className = "overtype-toolbar";
     this.container.setAttribute("role", "toolbar");
     this.container.setAttribute("aria-label", "Text formatting");
-    const buttonConfig = [
+    const buttonConfig = (_a = this.buttonConfig) != null ? _a : [
       { name: "bold", icon: boldIcon, title: "Bold (Ctrl+B)", action: "toggleBold" },
       { name: "italic", icon: italicIcon, title: "Italic (Ctrl+I)", action: "toggleItalic" },
       { separator: true },
@@ -1729,7 +2394,7 @@ var Toolbar = class {
       { name: "orderedList", icon: orderedListIcon, title: "Numbered List", action: "toggleNumberedList" },
       { name: "taskList", icon: taskListIcon, title: "Task List", action: "toggleTaskList" },
       { separator: true },
-      { name: "togglePlain", icon: eyeIcon, title: "Show plain textarea", action: "toggle-plain" }
+      { name: "viewMode", icon: eyeIcon, title: "View mode", action: "toggle-view-menu", hasDropdown: true }
     ];
     buttonConfig.forEach((config) => {
       if (config.separator) {
@@ -1758,16 +2423,26 @@ var Toolbar = class {
     button.setAttribute("aria-label", config.title);
     button.setAttribute("data-action", config.action);
     button.innerHTML = config.icon;
+    if (config.hasDropdown) {
+      button.classList.add("has-dropdown");
+      if (config.name === "viewMode") {
+        this.viewModeButton = button;
+      }
+    }
     button.addEventListener("click", (e) => {
       e.preventDefault();
-      this.handleAction(config.action);
+      this.handleAction(config.action, button);
     });
     return button;
   }
-  async handleAction(action) {
+  async handleAction(action, button) {
     const textarea = this.editor.textarea;
     if (!textarea)
       return;
+    if (action === "toggle-view-menu") {
+      this.toggleViewDropdown(button);
+      return;
+    }
     textarea.focus();
     try {
       switch (action) {
@@ -1862,8 +2537,90 @@ var Toolbar = class {
       });
     } catch (error) {}
   }
+  toggleViewDropdown(button) {
+    const existingDropdown = document.querySelector(".overtype-dropdown-menu");
+    if (existingDropdown) {
+      existingDropdown.remove();
+      button.classList.remove("dropdown-active");
+      document.removeEventListener("click", this.handleDocumentClick);
+      return;
+    }
+    const dropdown = this.createViewDropdown();
+    const rect = button.getBoundingClientRect();
+    dropdown.style.top = `${rect.bottom + 4}px`;
+    dropdown.style.left = `${rect.left}px`;
+    document.body.appendChild(dropdown);
+    button.classList.add("dropdown-active");
+    this.handleDocumentClick = (e) => {
+      if (!button.contains(e.target) && !dropdown.contains(e.target)) {
+        dropdown.remove();
+        button.classList.remove("dropdown-active");
+        document.removeEventListener("click", this.handleDocumentClick);
+      }
+    };
+    setTimeout(() => {
+      document.addEventListener("click", this.handleDocumentClick);
+    }, 0);
+  }
+  createViewDropdown() {
+    const dropdown = document.createElement("div");
+    dropdown.className = "overtype-dropdown-menu";
+    const isPlain = this.editor.container.classList.contains("plain-mode");
+    const isPreview = this.editor.container.classList.contains("preview-mode");
+    const currentMode = isPreview ? "preview" : isPlain ? "plain" : "normal";
+    const modes = [
+      { id: "normal", label: "Normal Edit", icon: "✓" },
+      { id: "plain", label: "Plain Textarea", icon: "✓" },
+      { id: "preview", label: "Preview Mode", icon: "✓" }
+    ];
+    modes.forEach((mode) => {
+      const item = document.createElement("button");
+      item.className = "overtype-dropdown-item";
+      item.type = "button";
+      const check = document.createElement("span");
+      check.className = "overtype-dropdown-check";
+      check.textContent = currentMode === mode.id ? mode.icon : "";
+      const label = document.createElement("span");
+      label.textContent = mode.label;
+      item.appendChild(check);
+      item.appendChild(label);
+      if (currentMode === mode.id) {
+        item.classList.add("active");
+      }
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.setViewMode(mode.id);
+        dropdown.remove();
+        this.viewModeButton.classList.remove("dropdown-active");
+        document.removeEventListener("click", this.handleDocumentClick);
+      });
+      dropdown.appendChild(item);
+    });
+    return dropdown;
+  }
+  setViewMode(mode) {
+    this.editor.container.classList.remove("plain-mode", "preview-mode");
+    switch (mode) {
+      case "plain":
+        this.editor.showPlainTextarea(true);
+        break;
+      case "preview":
+        this.editor.showPreviewMode(true);
+        break;
+      case "normal":
+      default:
+        this.editor.showPlainTextarea(false);
+        if (typeof this.editor.showPreviewMode === "function") {
+          this.editor.showPreviewMode(false);
+        }
+        break;
+    }
+  }
   destroy() {
     if (this.container) {
+      if (this.handleDocumentClick) {
+        document.removeEventListener("click", this.handleDocumentClick);
+      }
       this.container.remove();
       this.container = null;
       this.buttons = {};
@@ -1905,29 +2662,29 @@ var LinkTooltip = class {
           position: absolute;
           position-anchor: var(--target-anchor, --link-0);
           position-area: block-end center;
-          margin-top: 8px;
+          margin-top: 8px !important;
           
-          background: #333;
-          color: white;
-          padding: 6px 10px;
-          border-radius: 16px;
-          font-size: 12px;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-          display: none;
-          z-index: 10000;
-          cursor: pointer;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          max-width: 300px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
+          background: #333 !important;
+          color: white !important;
+          padding: 6px 10px !important;
+          border-radius: 16px !important;
+          font-size: 12px !important;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+          display: none !important;
+          z-index: 10000 !important;
+          cursor: pointer !important;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+          max-width: 300px !important;
+          white-space: nowrap !important;
+          overflow: hidden !important;
+          text-overflow: ellipsis !important;
           
           position-try: most-width block-end inline-end, flip-inline, block-start center;
           position-visibility: anchors-visible;
         }
         
         .overtype-link-tooltip.visible {
-          display: flex;
+          display: flex !important;
         }
       }
     `;
@@ -2063,7 +2820,8 @@ var _OverType = class _OverType2 {
     this.shortcuts = new ShortcutsManager(this);
     this.linkTooltip = new LinkTooltip(this);
     if (this.options.toolbar) {
-      this.toolbar = new Toolbar(this);
+      const toolbarButtons = typeof this.options.toolbar === "object" ? this.options.toolbar.buttons : null;
+      this.toolbar = new Toolbar(this, toolbarButtons);
       this.toolbar.create();
       this.textarea.addEventListener("selectionchange", () => {
         this.toolbar.updateButtonStates();
@@ -2100,7 +2858,8 @@ var _OverType = class _OverType2 {
       showActiveLineRaw: false,
       showStats: false,
       toolbar: false,
-      statsFormatter: null
+      statsFormatter: null,
+      smartLists: true
     };
     const { theme, colors, ...cleanOptions } = options;
     return {
@@ -2296,17 +3055,6 @@ var _OverType = class _OverType2 {
       closeFence.style.display = "block";
       openParent.classList.add("code-block-line");
       closeParent.classList.add("code-block-line");
-      let currentDiv = openParent.nextElementSibling;
-      while (currentDiv && currentDiv !== closeParent) {
-        if (currentDiv.tagName === "DIV") {
-          currentDiv.classList.add("code-block-line");
-          const plainText = currentDiv.textContent;
-          currentDiv.textContent = plainText;
-        }
-        currentDiv = currentDiv.nextElementSibling;
-        if (!currentDiv)
-          break;
-      }
     }
   }
   _getCurrentLine(text, cursorPos) {
@@ -2331,9 +3079,14 @@ var _OverType = class _OverType2 {
 `);
         const outdented = lines.map((line) => line.replace(/^  /, "")).join(`
 `);
-        this.textarea.value = before + outdented + after;
-        this.textarea.selectionStart = start;
-        this.textarea.selectionEnd = start + outdented.length;
+        if (document.execCommand) {
+          this.textarea.setSelectionRange(start, end);
+          document.execCommand("insertText", false, outdented);
+        } else {
+          this.textarea.value = before + outdented + after;
+          this.textarea.selectionStart = start;
+          this.textarea.selectionEnd = start + outdented.length;
+        }
       } else if (start !== end) {
         const before = value.substring(0, start);
         const selection = value.substring(start, end);
@@ -2342,19 +3095,110 @@ var _OverType = class _OverType2 {
 `);
         const indented = lines.map((line) => "  " + line).join(`
 `);
-        this.textarea.value = before + indented + after;
-        this.textarea.selectionStart = start;
-        this.textarea.selectionEnd = start + indented.length;
+        if (document.execCommand) {
+          this.textarea.setSelectionRange(start, end);
+          document.execCommand("insertText", false, indented);
+        } else {
+          this.textarea.value = before + indented + after;
+          this.textarea.selectionStart = start;
+          this.textarea.selectionEnd = start + indented.length;
+        }
       } else {
-        this.textarea.value = value.substring(0, start) + "  " + value.substring(end);
-        this.textarea.selectionStart = this.textarea.selectionEnd = start + 2;
+        if (document.execCommand) {
+          document.execCommand("insertText", false, "  ");
+        } else {
+          this.textarea.value = value.substring(0, start) + "  " + value.substring(end);
+          this.textarea.selectionStart = this.textarea.selectionEnd = start + 2;
+        }
       }
       this.textarea.dispatchEvent(new Event("input", { bubbles: true }));
       return;
     }
+    if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && this.options.smartLists) {
+      if (this.handleSmartListContinuation()) {
+        event.preventDefault();
+        return;
+      }
+    }
     const handled = this.shortcuts.handleKeydown(event);
     if (!handled && this.options.onKeydown) {
       this.options.onKeydown(event, this);
+    }
+  }
+  handleSmartListContinuation() {
+    const textarea = this.textarea;
+    const cursorPos = textarea.selectionStart;
+    const context = MarkdownParser.getListContext(textarea.value, cursorPos);
+    if (!context || !context.inList)
+      return false;
+    if (context.content.trim() === "" && cursorPos >= context.markerEndPos) {
+      this.deleteListMarker(context);
+      return true;
+    }
+    if (cursorPos > context.markerEndPos && cursorPos < context.lineEnd) {
+      this.splitListItem(context, cursorPos);
+    } else {
+      this.insertNewListItem(context);
+    }
+    if (context.listType === "numbered") {
+      this.scheduleNumberedListUpdate();
+    }
+    return true;
+  }
+  deleteListMarker(context) {
+    this.textarea.setSelectionRange(context.lineStart, context.markerEndPos);
+    document.execCommand("delete");
+    this.textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  insertNewListItem(context) {
+    const newItem = MarkdownParser.createNewListItem(context);
+    document.execCommand("insertText", false, `
+` + newItem);
+    this.textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  splitListItem(context, cursorPos) {
+    const textAfterCursor = context.content.substring(cursorPos - context.markerEndPos);
+    this.textarea.setSelectionRange(cursorPos, context.lineEnd);
+    document.execCommand("delete");
+    const newItem = MarkdownParser.createNewListItem(context);
+    document.execCommand("insertText", false, `
+` + newItem + textAfterCursor);
+    const newCursorPos = this.textarea.selectionStart - textAfterCursor.length;
+    this.textarea.setSelectionRange(newCursorPos, newCursorPos);
+    this.textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  scheduleNumberedListUpdate() {
+    if (this.numberUpdateTimeout) {
+      clearTimeout(this.numberUpdateTimeout);
+    }
+    this.numberUpdateTimeout = setTimeout(() => {
+      this.updateNumberedLists();
+    }, 10);
+  }
+  updateNumberedLists() {
+    const value = this.textarea.value;
+    const cursorPos = this.textarea.selectionStart;
+    const newValue = MarkdownParser.renumberLists(value);
+    if (newValue !== value) {
+      let offset = 0;
+      const oldLines = value.split(`
+`);
+      const newLines = newValue.split(`
+`);
+      let charCount = 0;
+      for (let i = 0;i < oldLines.length && charCount < cursorPos; i++) {
+        if (oldLines[i] !== newLines[i]) {
+          const diff = newLines[i].length - oldLines[i].length;
+          if (charCount + oldLines[i].length < cursorPos) {
+            offset += diff;
+          }
+        }
+        charCount += oldLines[i].length + 1;
+      }
+      this.textarea.value = newValue;
+      const newCursorPos = cursorPos + offset;
+      this.textarea.setSelectionRange(newCursorPos, newCursorPos);
+      this.textarea.dispatchEvent(new Event("input", { bubbles: true }));
     }
   }
   handleScroll(event) {
@@ -2370,6 +3214,22 @@ var _OverType = class _OverType2 {
     if (this.options.autoResize) {
       this._updateAutoHeight();
     }
+  }
+  getRenderedHTML(options = {}) {
+    const markdown = this.getValue();
+    let html = MarkdownParser.parse(markdown);
+    if (options.cleanHTML) {
+      html = html.replace(/<span class="syntax-marker[^"]*">.*?<\/span>/g, "");
+      html = html.replace(/\sclass="(bullet-list|ordered-list|code-fence|hr-marker|blockquote|url-part)"/g, "");
+      html = html.replace(/\sclass=""/g, "");
+    }
+    return html;
+  }
+  getPreviewHTML() {
+    return this.preview.innerHTML;
+  }
+  getCleanHTML() {
+    return this.getRenderedHTML({ cleanHTML: true });
   }
   focus() {
     this.textarea.focus();
@@ -2484,6 +3344,14 @@ var _OverType = class _OverType2 {
         toggleBtn.classList.toggle("active", !show);
         toggleBtn.title = show ? "Show markdown preview" : "Show plain textarea";
       }
+    }
+    return show;
+  }
+  showPreviewMode(show) {
+    if (show) {
+      this.container.classList.add("preview-mode");
+    } else {
+      this.container.classList.remove("preview-mode");
     }
     return show;
   }
