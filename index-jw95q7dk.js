@@ -3515,6 +3515,7 @@ var [editor] = new overtype_default("#editor", {
   autofocus: true,
   minHeight: "90vh",
   autoResize: true,
+  smartLists: true,
   textareaProps: {
     autocomplete: true,
     spellcheck: "default"
