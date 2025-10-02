@@ -36,6 +36,7 @@ const [editor] = new OverType("#editor", {
   autofocus: true,
   minHeight: "90vh",
   autoResize: true,
+  smartLists: true,
   textareaProps: {
     autocomplete: true,
     spellcheck: "default",
